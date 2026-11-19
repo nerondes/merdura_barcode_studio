@@ -1,5 +1,6 @@
 /target
 /dist
+*.pdf
 data.json
 data.json.tmp
 data.db
