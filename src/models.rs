@@ -449,10 +449,10 @@ impl BarcodeRecord {
             id: None,
             group_id: 1,
             barcode: "8691234567890".to_string(),
-            desc1: "ÖRNEK ÜRÜN ADI".to_string(),
-            desc2: "KOD: MRD-2026 +++ RENK: SİYAH".to_string(),
-            desc3: "RAF: A-12".to_string(),
-            desc4: "YERLİ ÜRETİM".to_string(),
+            desc1: "MRD-3102".to_string(),
+            desc2: "PASLANMAZ ÇELİK KAÇEROLA\n18x8 cm • 1,8 Lt".to_string(),
+            desc3: "AISI 304 KALİTE".to_string(),
+            desc4: "MERDURA".to_string(),
             print_count: 1,
         }
     }
@@ -472,17 +472,22 @@ pub fn parse_flexible_f32(input: &str) -> Option<f32> {
     }
 }
 
-/// İlk çalıştırmada ./templates klasörünü ve 3 örnek şablonu oluşturur.
+/// İlk çalıştırmada ./templates klasörünü ve 3 hazır stüdyo şablonunu oluşturur.
 pub fn ensure_default_templates(templates_dir: &Path) -> Result<()> {
     if !templates_dir.exists() {
         fs::create_dir_all(templates_dir)
             .with_context(|| format!("Şablon klasörü oluşturulamadı: {:?}", templates_dir))?;
     }
 
+    // Klasörde halihazırda kullanıcı şablonu varsa ekstra dosya dayatma; yalnızca boşsa varsayılanları üret
+    if !list_templates(templates_dir).is_empty() {
+        return Ok(());
+    }
+
     let defaults = [
-        ("1_Sutun_Yatay.json", LabelTemplate::default_1_col_horizontal()),
-        ("1_Sutun_Dikey.json", LabelTemplate::default_1_col_vertical()),
-        ("4_Sutun_40x20mm.json", LabelTemplate::default_4_col_40x20()),
+        ("Standart_Yatay_60x40.json", LabelTemplate::default_1_col_horizontal()),
+        ("Dikey_Etiket_60x40.json", LabelTemplate::default_1_col_vertical()),
+        ("Coklu_Rulo_4x_40x20.json", LabelTemplate::default_4_col_40x20()),
     ];
 
     for (file_name, tpl) in defaults {

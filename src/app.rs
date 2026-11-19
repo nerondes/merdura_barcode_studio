@@ -7,15 +7,31 @@ use crate::models::{
 };
 use crate::printer::{list_system_printers, print_records};
 use crate::renderer::{FontEngine, RgbaImage, WHITE, render_roll_rows, render_single_label};
-use eframe::egui::{self, Color32, ColorImage, RichText, Sense, TextureHandle, TextureOptions};
+use eframe::egui::{
+    self, Color32, ColorImage, CornerRadius, Margin, RichText, Sense, Stroke, TextureHandle,
+    TextureOptions,
+};
 use egui_extras::{Column, TableBuilder};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+// Merdura Kurumsal Renk Paleti (logo_barkod.png üzerinden örneklenmiştir)
+const MERDURA_TEAL: Color32 = Color32::from_rgb(24, 158, 154);
+const MERDURA_TURQUOISE: Color32 = Color32::from_rgb(44, 197, 192);
+const MERDURA_ROSE: Color32 = Color32::from_rgb(235, 36, 105);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ActiveTab {
-    Records,
-    Settings,
+enum PrintScope {
+    All,
+    Selected,
+    Range,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InspectorTab {
+    PageAndRoll,
+    Barcode,
+    TextLayers,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,18 +107,130 @@ impl Default for PrintPreviewModal {
     }
 }
 
+/// Merdura kurumsal Açık / Koyu stüdyo temasını egui bağlamına uygular.
+pub fn apply_merdura_theme(ctx: &egui::Context, dark_mode: bool) {
+    let mut style = (*ctx.style()).clone();
+    style.spacing.item_spacing = egui::vec2(7.0, 6.0);
+    style.spacing.button_padding = egui::vec2(10.0, 5.0);
+    style.spacing.window_margin = Margin::same(12);
+
+    let radius = CornerRadius::same(7);
+    let mut visuals = if dark_mode {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
+
+    visuals.window_corner_radius = CornerRadius::same(10);
+    visuals.menu_corner_radius = CornerRadius::same(8);
+
+    if dark_mode {
+        let bg_panel = Color32::from_rgb(20, 24, 33);
+        let bg_card = Color32::from_rgb(29, 35, 47);
+        let bg_hover = Color32::from_rgb(39, 48, 64);
+        let border = Color32::from_rgb(48, 58, 76);
+        let fg_text = Color32::from_rgb(232, 238, 246);
+
+        visuals.panel_fill = bg_panel;
+        visuals.window_fill = bg_card;
+        visuals.extreme_bg_color = Color32::from_rgb(15, 18, 25);
+        visuals.faint_bg_color = Color32::from_rgb(25, 30, 41);
+
+        visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(44, 197, 192, 65);
+        visuals.selection.stroke = Stroke::new(1.2_f32, MERDURA_TURQUOISE);
+
+        visuals.widgets.noninteractive.bg_fill = bg_card;
+        visuals.widgets.noninteractive.weak_bg_fill = bg_card;
+        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, border);
+        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, fg_text);
+        visuals.widgets.noninteractive.corner_radius = radius;
+
+        visuals.widgets.inactive.bg_fill = bg_card;
+        visuals.widgets.inactive.weak_bg_fill = bg_card;
+        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, border);
+        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, fg_text);
+        visuals.widgets.inactive.corner_radius = radius;
+
+        visuals.widgets.hovered.bg_fill = bg_hover;
+        visuals.widgets.hovered.weak_bg_fill = bg_hover;
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.2_f32, MERDURA_TURQUOISE);
+        visuals.widgets.hovered.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
+        visuals.widgets.hovered.corner_radius = radius;
+
+        visuals.widgets.active.bg_fill = MERDURA_TEAL;
+        visuals.widgets.active.weak_bg_fill = MERDURA_TEAL;
+        visuals.widgets.active.bg_stroke = Stroke::new(1.2_f32, MERDURA_TURQUOISE);
+        visuals.widgets.active.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
+        visuals.widgets.active.corner_radius = radius;
+
+        visuals.widgets.open.bg_fill = bg_hover;
+        visuals.widgets.open.weak_bg_fill = bg_hover;
+        visuals.widgets.open.bg_stroke = Stroke::new(1.2_f32, MERDURA_TURQUOISE);
+        visuals.widgets.open.corner_radius = radius;
+    } else {
+        let bg_panel = Color32::from_rgb(243, 246, 250);
+        let bg_card = Color32::WHITE;
+        let bg_hover = Color32::from_rgb(232, 244, 244);
+        let border = Color32::from_rgb(214, 222, 232);
+        let fg_text = Color32::from_rgb(28, 37, 50);
+
+        visuals.panel_fill = bg_panel;
+        visuals.window_fill = bg_card;
+        visuals.extreme_bg_color = Color32::WHITE;
+        visuals.faint_bg_color = Color32::from_rgb(236, 240, 246);
+
+        visuals.selection.bg_fill = Color32::from_rgba_unmultiplied(24, 158, 154, 42);
+        visuals.selection.stroke = Stroke::new(1.2_f32, MERDURA_TEAL);
+
+        visuals.widgets.noninteractive.bg_fill = bg_card;
+        visuals.widgets.noninteractive.weak_bg_fill = bg_card;
+        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, border);
+        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, fg_text);
+        visuals.widgets.noninteractive.corner_radius = radius;
+
+        visuals.widgets.inactive.bg_fill = bg_card;
+        visuals.widgets.inactive.weak_bg_fill = bg_card;
+        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, border);
+        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, fg_text);
+        visuals.widgets.inactive.corner_radius = radius;
+
+        visuals.widgets.hovered.bg_fill = bg_hover;
+        visuals.widgets.hovered.weak_bg_fill = bg_hover;
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.2_f32, MERDURA_TEAL);
+        visuals.widgets.hovered.fg_stroke = Stroke::new(1.2_f32, Color32::from_rgb(15, 23, 42));
+        visuals.widgets.hovered.corner_radius = radius;
+
+        visuals.widgets.active.bg_fill = MERDURA_TEAL;
+        visuals.widgets.active.weak_bg_fill = MERDURA_TEAL;
+        visuals.widgets.active.bg_stroke = Stroke::new(1.2_f32, MERDURA_TEAL);
+        visuals.widgets.active.fg_stroke = Stroke::new(1.2_f32, Color32::WHITE);
+        visuals.widgets.active.corner_radius = radius;
+
+        visuals.widgets.open.bg_fill = bg_hover;
+        visuals.widgets.open.weak_bg_fill = bg_hover;
+        visuals.widgets.open.bg_stroke = Stroke::new(1.2_f32, MERDURA_TEAL);
+        visuals.widgets.open.corner_radius = radius;
+    }
+
+    style.visuals = visuals;
+    ctx.set_style(style);
+}
+
 pub struct BarkodStudyoApp {
     db: Database,
     i18n: I18n,
     font_engine: FontEngine,
     templates_dir: PathBuf,
 
-    // Sekme ve durum
-    active_tab: ActiveTab,
+    // Görünüm, Tema ve Durum
+    dark_mode: bool,
+    theme_dirty: bool,
+    print_scope: PrintScope,
+    inspector_tab: InspectorTab,
     status_msg: String,
     status_level: StatusLevel,
 
-    // Gruplar ve kayıtlar
+    // Koleksiyonlar ve ürünler
     groups: Vec<Group>,
     active_group_id: i64,
     records: Vec<BarcodeRecord>,
@@ -121,10 +249,10 @@ pub struct BarkodStudyoApp {
     printers: Vec<String>,
     selected_printer: String,
 
-    // Esnek ondalık metin giriş tamponları (virgül ve nokta desteği için)
+    // Esnek ondalık giriş tamponları
     float_buffers: BTreeMap<String, String>,
 
-    // Canlı Önizleme önbelleği
+    // Canlı Önizleme ve Marka Logosu
     preview_dirty: bool,
     preview_show_full_row: bool,
     preview_zoom: f32,
@@ -152,11 +280,9 @@ impl BarkodStudyoApp {
         let _ = ensure_default_templates(&templates_dir);
         let template_files = list_templates(&templates_dir);
         let active_template_file = template_files
-            .iter()
-            .find(|n| n.as_str() == "1_Sutun_Yatay.json")
+            .first()
             .cloned()
-            .or_else(|| template_files.first().cloned())
-            .unwrap_or_else(|| "1_Sutun_Yatay.json".to_string());
+            .unwrap_or_else(|| "Standart_Yatay_60x40.json".to_string());
 
         let template = load_template(&templates_dir, &active_template_file)
             .unwrap_or_else(|_| LabelTemplate::default_1_col_horizontal());
@@ -165,7 +291,12 @@ impl BarkodStudyoApp {
         let active_group_id = groups.first().map(|g| g.id).unwrap_or(1);
 
         let printers = list_system_printers();
-        let selected_printer = printers.first().cloned().unwrap_or_default();
+        let selected_printer = printers
+            .iter()
+            .find(|p| p.to_lowercase().contains("argox") || p.to_lowercase().contains("zebra"))
+            .cloned()
+            .or_else(|| printers.first().cloned())
+            .unwrap_or_default();
 
         let status_ready = i18n.t("status_ready").to_string();
 
@@ -174,7 +305,10 @@ impl BarkodStudyoApp {
             i18n,
             font_engine,
             templates_dir,
-            active_tab: ActiveTab::Records,
+            dark_mode: false,
+            theme_dirty: true,
+            print_scope: PrintScope::All,
+            inspector_tab: InspectorTab::PageAndRoll,
             status_msg: status_ready,
             status_level: StatusLevel::Info,
             groups,
@@ -236,14 +370,14 @@ impl BarkodStudyoApp {
 
         if let Some(sel_id) = self.selected_record_id {
             if let Some(found) = self.records.iter().find(|r| r.id == Some(sel_id)) {
-                self.editor_record = found.clone();
+                self.editor_record = normalize_legacy_multiline(found);
             } else {
                 self.selected_record_id = None;
                 self.editor_record = BarcodeRecord::new_empty(self.active_group_id);
             }
         } else if let Some(first) = self.records.first() {
             self.selected_record_id = first.id;
-            self.editor_record = first.clone();
+            self.editor_record = normalize_legacy_multiline(first);
         } else {
             self.editor_record = BarcodeRecord::new_empty(self.active_group_id);
         }
@@ -280,16 +414,51 @@ impl BarkodStudyoApp {
         }
     }
 
-    fn records_in_selected_range(&self) -> Vec<BarcodeRecord> {
-        let selected_indices = slice_1based_inclusive(
-            &self.filtered_indices,
-            self.range_start,
-            self.range_end,
-        );
-        selected_indices
-            .into_iter()
-            .filter_map(|idx| self.records.get(idx).cloned())
-            .collect()
+    fn collect_scope_records(&mut self) -> Option<Vec<BarcodeRecord>> {
+        match self.print_scope {
+            PrintScope::All => {
+                let list: Vec<BarcodeRecord> = self
+                    .filtered_indices
+                    .iter()
+                    .filter_map(|&idx| self.records.get(idx).cloned())
+                    .collect();
+                if list.is_empty() {
+                    let msg = self.i18n.t("err_no_records").to_string();
+                    self.set_status(StatusLevel::Warning, msg);
+                    None
+                } else {
+                    Some(list)
+                }
+            }
+            PrintScope::Selected => {
+                if self.editor_record.barcode.trim().is_empty() && self.selected_record_id.is_none()
+                {
+                    let msg = self.i18n.t("err_no_active_record").to_string();
+                    self.set_status(StatusLevel::Warning, msg);
+                    None
+                } else {
+                    Some(vec![self.active_record_for_preview()])
+                }
+            }
+            PrintScope::Range => {
+                let selected_indices = slice_1based_inclusive(
+                    &self.filtered_indices,
+                    self.range_start,
+                    self.range_end,
+                );
+                let list: Vec<BarcodeRecord> = selected_indices
+                    .into_iter()
+                    .filter_map(|idx| self.records.get(idx).cloned())
+                    .collect();
+                if list.is_empty() {
+                    let msg = self.i18n.t("err_empty_range").to_string();
+                    self.set_status(StatusLevel::Warning, msg);
+                    None
+                } else {
+                    Some(list)
+                }
+            }
+        }
     }
 
     fn active_record_for_preview(&self) -> BarcodeRecord {
@@ -330,8 +499,13 @@ impl BarkodStudyoApp {
                 sample.print_count = self.template.columns;
                 vec![sample]
             };
-            let (mut rows, w) =
-                render_roll_rows(&source_records, &self.template, preview_dpi, &self.font_engine, true);
+            let (mut rows, w) = render_roll_rows(
+                &source_records,
+                &self.template,
+                preview_dpi,
+                &self.font_engine,
+                true,
+            );
             let img = rows
                 .pop()
                 .unwrap_or_else(|| RgbaImage::from_pixel(100, 50, WHITE));
@@ -356,11 +530,6 @@ impl BarkodStudyoApp {
     }
 
     fn open_print_preview(&mut self, records_to_preview: Vec<BarcodeRecord>) {
-        if records_to_preview.is_empty() {
-            let msg = self.i18n.t("err_no_records").to_string();
-            self.set_status(StatusLevel::Warning, msg);
-            return;
-        }
         let preview_dpi = self.template.dpi_override.unwrap_or(203).clamp(72, 600);
         let (pages, warn) = render_roll_rows(
             &records_to_preview,
@@ -406,57 +575,19 @@ impl BarkodStudyoApp {
             Ok(summary) => {
                 let suffix = self.i18n.t("msg_printed");
                 let info = format!(
-                    "{} sayfa ({} DPI - {}) {}",
+                    "{} sayfa ({} DPI • {}) {}",
                     summary.pages_sent, summary.dpi_used, self.selected_printer, suffix
                 );
                 if let Some(w) = summary.warning {
-                    self.set_status(StatusLevel::Warning, format!("{info} | Uyarı: {w}"));
+                    self.set_status(StatusLevel::Warning, format!("{info} | {w}"));
                 } else {
                     self.set_status(StatusLevel::Info, info);
                 }
             }
             Err(err) => {
-                self.set_status(StatusLevel::Error, format!("Yazdırma hatası: {err}"));
+                self.set_status(StatusLevel::Error, format!("{err}"));
             }
         }
-    }
-
-    /// Hem virgül (,) hem nokta (.) kabul eden sayısal metin kutusu yardımcısı.
-    fn flexible_f32_edit(
-        float_buffers: &mut BTreeMap<String, String>,
-        ui: &mut egui::Ui,
-        id_key: &str,
-        value: &mut f32,
-        min: f32,
-        max: f32,
-    ) -> bool {
-        let mut changed = false;
-        let entry = float_buffers
-            .entry(id_key.to_string())
-            .or_insert_with(|| format_clean_f32(*value));
-
-        let resp = ui.add_sized([76.0, 22.0], egui::TextEdit::singleline(entry));
-        if resp.changed() {
-            if let Some(parsed) = parse_flexible_f32(entry) {
-                let clamped = parsed.clamp(min, max);
-                if (*value - clamped).abs() > f32::EPSILON {
-                    *value = clamped;
-                    changed = true;
-                }
-            }
-        } else if !resp.has_focus() {
-            // Odak dışında şablon değiştiyse tamponu senkronize et
-            let expected = format_clean_f32(*value);
-            if *entry != expected {
-                *entry = expected;
-            }
-        }
-
-        if resp.lost_focus() {
-            *entry = format_clean_f32(*value);
-        }
-
-        changed
     }
 
     fn ensure_brand_logo(&mut self, ctx: &egui::Context) {
@@ -471,117 +602,157 @@ impl BarkodStudyoApp {
         }
     }
 
-    fn draw_top_toolbar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+    fn flexible_f32_edit(
+        float_buffers: &mut BTreeMap<String, String>,
+        ui: &mut egui::Ui,
+        id_key: &str,
+        value: &mut f32,
+        min: f32,
+        max: f32,
+    ) -> bool {
+        let mut changed = false;
+        let entry = float_buffers
+            .entry(id_key.to_string())
+            .or_insert_with(|| format_clean_f32(*value));
+
+        let resp = ui.add_sized([68.0, 22.0], egui::TextEdit::singleline(entry));
+        if resp.changed() {
+            if let Some(parsed) = parse_flexible_f32(entry) {
+                let clamped = parsed.clamp(min, max);
+                if (*value - clamped).abs() > f32::EPSILON {
+                    *value = clamped;
+                    changed = true;
+                }
+            }
+        } else if !resp.has_focus() {
+            let expected = format_clean_f32(*value);
+            if *entry != expected {
+                *entry = expected;
+            }
+        }
+
+        if resp.lost_focus() {
+            *entry = format_clean_f32(*value);
+        }
+
+        changed
+    }
+
+    /// Merdura Kurumsal Üst Stüdyo Başlığı (Marka + Birleşik Baskı Merkezi + Tema/Dil)
+    fn draw_studio_header(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         self.ensure_brand_logo(ctx);
 
-        // 1. Satır: Marka Logosu + Tümünü / Aktif Kaydı / Belirli Sıra Aralığını Önizle & Yazdır + Dil Seçici
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.spacing_mut().item_spacing.x = 8.0;
 
+            // Sol: Merdura Logo + Stüdyo Başlığı
             if let Some(logo_tex) = &self.brand_logo_tex {
                 ui.add(
-                    egui::Image::from_texture((logo_tex.id(), egui::vec2(46.0, 24.0)))
+                    egui::Image::from_texture((logo_tex.id(), egui::vec2(50.0, 26.0)))
                         .maintain_aspect_ratio(true),
-                )
-                .on_hover_text(self.i18n.t("app_title"));
-                ui.separator();
+                );
             }
-
-            if ui.button(format!("🔍 {}", self.i18n.t("btn_preview_all"))).clicked() {
-                let all: Vec<BarcodeRecord> = self
-                    .filtered_indices
-                    .iter()
-                    .filter_map(|&idx| self.records.get(idx).cloned())
-                    .collect();
-                self.open_print_preview(all);
-            }
-            if ui.button(format!("🖨 {}", self.i18n.t("btn_print_all"))).clicked() {
-                let all: Vec<BarcodeRecord> = self
-                    .filtered_indices
-                    .iter()
-                    .filter_map(|&idx| self.records.get(idx).cloned())
-                    .collect();
-                self.execute_print(&all);
-            }
+            ui.label(
+                RichText::new("Merdura")
+                    .size(16.5)
+                    .strong()
+                    .color(if self.dark_mode {
+                        MERDURA_TURQUOISE
+                    } else {
+                        MERDURA_TEAL
+                    }),
+            );
+            ui.label(RichText::new("Barcode Studio").size(15.5).strong());
 
             ui.separator();
 
+            // Orta: Hedef Yazıcı Seçici + Birleşik Baskı Kapsamı + Önizle / Bas
+            ui.label("🖨");
+            let p_label = if self.selected_printer.is_empty() {
+                "--"
+            } else {
+                &self.selected_printer
+            };
+            egui::ComboBox::from_id_salt("hdr_printer_combo")
+                .selected_text(p_label)
+                .width(185.0)
+                .show_ui(ui, |ui| {
+                    for p in &self.printers {
+                        ui.selectable_value(&mut self.selected_printer, p.clone(), p);
+                    }
+                });
             if ui
-                .button(format!("👁 {}", self.i18n.t("btn_preview_active")))
+                .button("⟳")
+                .on_hover_text(self.i18n.t("btn_refresh"))
                 .clicked()
             {
-                if self.editor_record.barcode.trim().is_empty() && self.selected_record_id.is_none()
-                {
-                    let msg = self.i18n.t("err_no_active_record").to_string();
-                    self.set_status(StatusLevel::Warning, msg);
-                } else {
-                    let rec = self.active_record_for_preview();
-                    self.open_print_preview(vec![rec]);
-                }
-            }
-            if ui
-                .button(format!("🖨 {}", self.i18n.t("btn_print_active")))
-                .clicked()
-            {
-                if self.editor_record.barcode.trim().is_empty() && self.selected_record_id.is_none()
-                {
-                    let msg = self.i18n.t("err_no_active_record").to_string();
-                    self.set_status(StatusLevel::Warning, msg);
-                } else {
-                    let rec = self.active_record_for_preview();
-                    self.execute_print(&[rec]);
+                self.printers = list_system_printers();
+                if !self.printers.contains(&self.selected_printer) {
+                    self.selected_printer = self.printers.first().cloned().unwrap_or_default();
                 }
             }
 
             ui.separator();
 
-            // Belirli sıra aralığı (ör. 1 - 10) Önizle ve Yazdır
-            let max_rows = self.filtered_indices.len().max(1);
-            ui.label(RichText::new(self.i18n.t("lbl_range")).strong());
-            ui.add(
-                egui::DragValue::new(&mut self.range_start)
-                    .range(1..=max_rows)
-                    .speed(0.2),
+            // Kapsam Seçici Hapları (Tüm Liste | Seçili Ürün | Sıra Aralığı)
+            ui.selectable_value(
+                &mut self.print_scope,
+                PrintScope::All,
+                self.i18n.t("scope_all"),
             );
-            ui.label("-");
-            ui.add(
-                egui::DragValue::new(&mut self.range_end)
-                    .range(1..=max_rows)
-                    .speed(0.2),
+            ui.selectable_value(
+                &mut self.print_scope,
+                PrintScope::Selected,
+                self.i18n.t("scope_selected"),
+            );
+            ui.selectable_value(
+                &mut self.print_scope,
+                PrintScope::Range,
+                self.i18n.t("scope_range"),
             );
 
-            if ui
-                .button(format!("🔍 {}", self.i18n.t("btn_preview_range")))
-                .clicked()
-            {
-                let sub = self.records_in_selected_range();
-                if sub.is_empty() {
-                    let msg = self.i18n.t("err_empty_range").to_string();
-                    self.set_status(StatusLevel::Warning, msg);
-                } else {
-                    self.open_print_preview(sub);
-                }
+            if self.print_scope == PrintScope::Range {
+                let max_rows = self.filtered_indices.len().max(1);
+                ui.add(
+                    egui::DragValue::new(&mut self.range_start)
+                        .range(1..=max_rows)
+                        .speed(0.2),
+                );
+                ui.label("–");
+                ui.add(
+                    egui::DragValue::new(&mut self.range_end)
+                        .range(1..=max_rows)
+                        .speed(0.2),
+                );
             }
 
             if ui
-                .button(format!("🖨 {}", self.i18n.t("btn_print_range")))
+                .button(format!("🔍 {}", self.i18n.t("btn_preview")))
                 .clicked()
+                && let Some(recs) = self.collect_scope_records()
             {
-                let sub = self.records_in_selected_range();
-                if sub.is_empty() {
-                    let msg = self.i18n.t("err_empty_range").to_string();
-                    self.set_status(StatusLevel::Warning, msg);
-                } else {
-                    self.execute_print(&sub);
-                }
+                self.open_print_preview(recs);
             }
 
-            // Sağ köşede dinamik Dil Seçici
+            let cta_btn = egui::Button::new(
+                RichText::new(format!("🖨 {}", self.i18n.t("btn_print_now")))
+                    .color(Color32::WHITE)
+                    .strong(),
+            )
+            .fill(MERDURA_TEAL);
+
+            if ui.add(cta_btn).clicked()
+                && let Some(recs) = self.collect_scope_records()
+            {
+                self.execute_print(&recs);
+            }
+
+            // Sağ: Dil Seçici & Açık/Koyu Tema Anahtarı
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let current_code = self.i18n.active_lang().to_uppercase();
-                let resp = egui::ComboBox::from_id_salt("top_lang_combo")
+                let resp = egui::ComboBox::from_id_salt("hdr_lang_combo")
                     .selected_text(current_code)
-                    .width(115.0)
+                    .width(95.0)
                     .show_ui(ui, |ui| {
                         for (code, label) in self.i18n.available_languages() {
                             if ui
@@ -593,123 +764,667 @@ impl BarkodStudyoApp {
                         }
                     });
                 if resp.response.clicked() {
-                    // Kullanıcı klasöre yeni bir .json dil dosyası attıysa anında algıla
                     self.i18n.reload_external_locales();
                 }
-                ui.label(self.i18n.t("lbl_language"));
-            });
-        });
 
-        ui.separator();
-
-        // 2. Satır: Sekme Seçiciler + Barkod Türü + Şablon Profili Yönetimi
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-
-            ui.selectable_value(
-                &mut self.active_tab,
-                ActiveTab::Records,
-                RichText::new(format!("📋 {}", self.i18n.t("tab_records"))).strong(),
-            );
-            ui.selectable_value(
-                &mut self.active_tab,
-                ActiveTab::Settings,
-                RichText::new(format!("⚙ {}", self.i18n.t("tab_settings"))).strong(),
-            );
-
-            ui.separator();
-
-            // Barkod Türü Seçici
-            ui.label(self.i18n.t("lbl_barcode_kind"));
-            egui::ComboBox::from_id_salt("top_barcode_kind")
-                .selected_text(self.template.barcode_kind.display_name())
-                .width(105.0)
-                .show_ui(ui, |ui| {
-                    for kind in BarcodeKind::ALL {
-                        if ui
-                            .selectable_value(
-                                &mut self.template.barcode_kind,
-                                *kind,
-                                kind.display_name(),
-                            )
-                            .changed()
-                        {
-                            self.preview_dirty = true;
-                        }
-                    }
-                });
-
-            ui.separator();
-
-            // Şablon Seçici ve Kaydet / Yeni butonları
-            ui.label(self.i18n.t("lbl_template"));
-            let current_tpl_name = self.active_template_file.clone();
-            egui::ComboBox::from_id_salt("top_template_combo")
-                .selected_text(&current_tpl_name)
-                .width(175.0)
-                .show_ui(ui, |ui| {
-                    for fname in self.template_files.clone() {
-                        if ui
-                            .selectable_label(self.active_template_file == fname, &fname)
-                            .clicked()
-                        {
-                            match load_template(&self.templates_dir, &fname) {
-                                Ok(loaded) => {
-                                    self.template = loaded;
-                                    self.active_template_file = fname;
-                                    self.float_buffers.clear();
-                                    self.preview_dirty = true;
-                                }
-                                Err(e) => {
-                                    self.set_status(
-                                        StatusLevel::Error,
-                                        format!("Şablon yüklenemedi: {e}"),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                });
-
-            if ui
-                .button(format!("💾 {}", self.i18n.t("btn_save_template")))
-                .clicked()
-            {
-                match save_template(
-                    &self.templates_dir,
-                    &self.active_template_file,
-                    &self.template,
-                ) {
-                    Ok(()) => {
-                        let msg = format!(
-                            "{} {}",
-                            self.i18n.t("msg_saved_template"),
-                            self.active_template_file
-                        );
-                        self.set_status(StatusLevel::Info, msg);
-                    }
-                    Err(e) => self.set_status(StatusLevel::Error, format!("{e}")),
+                let theme_label = if self.dark_mode {
+                    format!("🌙 {}", self.i18n.t("theme_dark"))
+                } else {
+                    format!("☀ {}", self.i18n.t("theme_light"))
+                };
+                if ui.button(theme_label).clicked() {
+                    self.dark_mode = !self.dark_mode;
+                    self.theme_dirty = true;
                 }
-            }
-
-            if ui
-                .button(format!("➕ {}", self.i18n.t("btn_new_template")))
-                .clicked()
-            {
-                self.new_tpl_name = "Yeni_Sablon.json".to_string();
-                self.new_tpl_open = true;
-            }
+            });
         });
     }
 
-    fn draw_records_tab(&mut self, ui: &mut egui::Ui) {
-        // 1. Üst arama/filtreleme çubuğu
+    /// Sol Kenar Çubuğu: Koleksiyonlar, Etiket Şablonları ve Veri Araçları
+    fn draw_left_sidebar(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .id_salt("left_sidebar_scroll")
+            .show(ui, |ui| {
+                ui.add_space(4.0);
+
+                // 1. KOLEKSİYONLAR BÖLÜMÜ
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(self.i18n.t("sec_collections"))
+                            .size(11.5)
+                            .strong()
+                            .color(MERDURA_TEAL),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .small_button(format!("+ {}", self.i18n.t("btn_new_collection")))
+                            .clicked()
+                        {
+                            self.new_group_name.clear();
+                            self.new_group_open = true;
+                        }
+                    });
+                });
+                ui.add_space(3.0);
+
+                for grp in self.groups.clone() {
+                    let is_active = self.active_group_id == grp.id;
+                    let resp = ui.add_sized(
+                        [ui.available_width(), 26.0],
+                        egui::Button::new(format!("📁  {}", grp.name)).selected(is_active),
+                    );
+                    if resp.clicked() && !is_active {
+                        self.active_group_id = grp.id;
+                        self.selected_record_id = None;
+                        self.reload_records();
+                    }
+                }
+
+                if self.groups.len() > 1
+                    && ui
+                        .small_button(format!("🗑 {}", self.i18n.t("btn_delete_collection")))
+                        .clicked()
+                {
+                    if let Err(e) = self.db.delete_group(self.active_group_id) {
+                        self.set_status(StatusLevel::Error, format!("{e}"));
+                    } else {
+                        self.reload_groups();
+                        self.selected_record_id = None;
+                        self.reload_records();
+                    }
+                }
+
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(6.0);
+
+                // 2. ETİKET ŞABLONLARI BÖLÜMÜ
+                ui.label(
+                    RichText::new(self.i18n.t("sec_templates"))
+                        .size(11.5)
+                        .strong()
+                        .color(MERDURA_TEAL),
+                );
+                ui.add_space(3.0);
+
+                for fname in self.template_files.clone() {
+                    let selected = self.active_template_file == fname;
+                    let display = fname.trim_end_matches(".json");
+                    let resp = ui.add_sized(
+                        [ui.available_width(), 26.0],
+                        egui::Button::new(format!("🏷  {display}")).selected(selected),
+                    );
+                    if resp.clicked() && !selected {
+                        match load_template(&self.templates_dir, &fname) {
+                            Ok(loaded) => {
+                                self.template = loaded;
+                                self.active_template_file = fname;
+                                self.float_buffers.clear();
+                                self.preview_dirty = true;
+                            }
+                            Err(e) => {
+                                self.set_status(StatusLevel::Error, format!("{e}"));
+                            }
+                        }
+                    }
+                }
+
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(format!("💾 {}", self.i18n.t("btn_save_tpl")))
+                        .clicked()
+                    {
+                        match save_template(
+                            &self.templates_dir,
+                            &self.active_template_file,
+                            &self.template,
+                        ) {
+                            Ok(()) => {
+                                let msg = format!(
+                                    "{} {}",
+                                    self.i18n.t("msg_saved_template"),
+                                    self.active_template_file
+                                );
+                                self.set_status(StatusLevel::Info, msg);
+                            }
+                            Err(e) => self.set_status(StatusLevel::Error, format!("{e}")),
+                        }
+                    }
+                    if ui
+                        .button(format!("+ {}", self.i18n.t("btn_save_as_tpl")))
+                        .clicked()
+                    {
+                        self.new_tpl_name = "Ozel_Sablon".to_string();
+                        self.new_tpl_open = true;
+                    }
+                });
+
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(6.0);
+
+                // 3. VERİ ARAÇLARI BÖLÜMÜ
+                ui.label(
+                    RichText::new(self.i18n.t("sec_tools"))
+                        .size(11.5)
+                        .strong()
+                        .color(MERDURA_TEAL),
+                );
+                ui.add_space(4.0);
+
+                if ui
+                    .add_sized(
+                        [ui.available_width(), 30.0],
+                        egui::Button::new(format!("📊  {}", self.i18n.t("btn_import_table"))),
+                    )
+                    .clicked()
+                {
+                    self.pick_and_open_import_file();
+                }
+
+                ui.add_space(4.0);
+
+                if ui
+                    .add_sized(
+                        [ui.available_width(), 30.0],
+                        egui::Button::new(format!("🔢  {}", self.i18n.t("btn_serial_tool"))),
+                    )
+                    .clicked()
+                {
+                    self.numerator_dlg.open = true;
+                }
+            });
+    }
+
+    /// Sağ Stüdyo Denetçisi: Her An Görünür Canlı Etiket Sahnesi + 3 Sekmeli Tasarım Denetçisi
+    fn draw_right_inspector(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        // ÜST YARI: CANLI ETİKET SAHNESİ
         ui.horizontal(|ui| {
-            ui.label(RichText::new(self.i18n.t("lbl_search")).strong());
+            ui.label(
+                RichText::new(format!("👁 {}", self.i18n.t("sec_live_stage")))
+                    .size(13.5)
+                    .strong(),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("1:1").clicked() {
+                    self.preview_zoom = 1.0;
+                }
+                ui.add(
+                    egui::Slider::new(&mut self.preview_zoom, 0.35..=2.2)
+                        .show_value(false)
+                        .trailing_fill(true),
+                );
+                if self.template.columns > 1
+                    && ui
+                        .checkbox(&mut self.preview_show_full_row, self.i18n.t("lbl_roll_view"))
+                        .changed()
+                {
+                    self.preview_dirty = true;
+                }
+            });
+        });
+
+        self.refresh_live_preview_if_needed(ctx);
+        let [pw, ph] = self.live_preview_size_px;
+
+        ui.label(
+            RichText::new(format!(
+                "{:.1} × {:.1} mm  •  {} Sütun  •  {}  •  {}×{} px",
+                self.template.total_row_width_mm(),
+                self.template.total_row_height_mm(),
+                self.template.columns,
+                self.template.barcode_kind.display_name(),
+                pw,
+                ph
+            ))
+            .size(11.0)
+            .color(if self.dark_mode {
+                Color32::from_rgb(148, 163, 184)
+            } else {
+                Color32::from_rgb(100, 116, 139)
+            }),
+        );
+
+        let stage_height = (ui.available_height() * 0.42).clamp(165.0, 290.0);
+        let stage_bg = if self.dark_mode {
+            Color32::from_rgb(13, 16, 23)
+        } else {
+            Color32::from_rgb(222, 228, 236)
+        };
+
+        egui::Frame::canvas(ui.style())
+            .fill(stage_bg)
+            .corner_radius(CornerRadius::same(8))
+            .inner_margin(10.0)
+            .show(ui, |ui| {
+                ui.set_height(stage_height);
+                egui::ScrollArea::both()
+                    .id_salt("studio_live_stage_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        if let Some(tex) = &self.live_preview_tex {
+                            let screen_scale = (96.0 / 203.0) * self.preview_zoom * 1.25;
+                            let disp_size = egui::vec2(
+                                (pw as f32 * screen_scale).max(20.0),
+                                (ph as f32 * screen_scale).max(20.0),
+                            );
+                            ui.centered_and_justified(|ui| {
+                                ui.add(
+                                    egui::Image::from_texture((tex.id(), disp_size))
+                                        .maintain_aspect_ratio(true),
+                                );
+                            });
+                        }
+                    });
+            });
+
+        ui.add_space(6.0);
+
+        // ALT YARI: 3 SEKMELİ TASARIM DENETÇİSİ
+        ui.horizontal(|ui| {
+            ui.selectable_value(
+                &mut self.inspector_tab,
+                InspectorTab::PageAndRoll,
+                format!("📐 {}", self.i18n.t("insp_tab_page")),
+            );
+            ui.selectable_value(
+                &mut self.inspector_tab,
+                InspectorTab::Barcode,
+                format!("▮▯ {}", self.i18n.t("insp_tab_barcode")),
+            );
+            ui.selectable_value(
+                &mut self.inspector_tab,
+                InspectorTab::TextLayers,
+                format!("Aa {}", self.i18n.t("insp_tab_text")),
+            );
+        });
+        ui.separator();
+
+        egui::ScrollArea::vertical()
+            .id_salt("inspector_props_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let mut dirty = false;
+
+                match self.inspector_tab {
+                    InspectorTab::PageAndRoll => {
+                        egui::Grid::new("insp_page_grid")
+                            .num_columns(2)
+                            .spacing([12.0, 7.0])
+                            .show(ui, |ui| {
+                                ui.label(self.i18n.t("lbl_columns"));
+                                if ui
+                                    .add(egui::Slider::new(&mut self.template.columns, 1..=8))
+                                    .changed()
+                                {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_label_width"));
+                                if Self::flexible_f32_edit(
+                                    &mut self.float_buffers,
+                                    ui,
+                                    "tpl_lw",
+                                    &mut self.template.label_width_mm,
+                                    5.0,
+                                    500.0,
+                                ) {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_label_height"));
+                                if Self::flexible_f32_edit(
+                                    &mut self.float_buffers,
+                                    ui,
+                                    "tpl_lh",
+                                    &mut self.template.label_height_mm,
+                                    5.0,
+                                    500.0,
+                                ) {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_h_gap"));
+                                if Self::flexible_f32_edit(
+                                    &mut self.float_buffers,
+                                    ui,
+                                    "tpl_hgap",
+                                    &mut self.template.horizontal_gap_mm,
+                                    0.0,
+                                    100.0,
+                                ) {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_margin_left"));
+                                if Self::flexible_f32_edit(
+                                    &mut self.float_buffers,
+                                    ui,
+                                    "tpl_ml",
+                                    &mut self.template.margin_left_mm,
+                                    0.0,
+                                    100.0,
+                                ) {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_margin_top"));
+                                if Self::flexible_f32_edit(
+                                    &mut self.float_buffers,
+                                    ui,
+                                    "tpl_mt",
+                                    &mut self.template.margin_top_mm,
+                                    0.0,
+                                    100.0,
+                                ) {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_dpi_override"));
+                                let mut custom_dpi = self.template.dpi_override.unwrap_or(0);
+                                if ui
+                                    .add(egui::DragValue::new(&mut custom_dpi).range(0..=1200))
+                                    .changed()
+                                {
+                                    self.template.dpi_override = if custom_dpi < 72 {
+                                        None
+                                    } else {
+                                        Some(custom_dpi)
+                                    };
+                                    dirty = true;
+                                }
+                                ui.end_row();
+                            });
+                    }
+                    InspectorTab::Barcode => {
+                        egui::Grid::new("insp_bc_grid")
+                            .num_columns(2)
+                            .spacing([12.0, 7.0])
+                            .show(ui, |ui| {
+                                ui.label(self.i18n.t("lbl_barcode_kind"));
+                                egui::ComboBox::from_id_salt("insp_bc_kind")
+                                    .selected_text(self.template.barcode_kind.display_name())
+                                    .width(135.0)
+                                    .show_ui(ui, |ui| {
+                                        for kind in BarcodeKind::ALL {
+                                            if ui
+                                                .selectable_value(
+                                                    &mut self.template.barcode_kind,
+                                                    *kind,
+                                                    kind.display_name(),
+                                                )
+                                                .changed()
+                                            {
+                                                dirty = true;
+                                            }
+                                        }
+                                    });
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_rotation"));
+                                let rot_label = self
+                                    .i18n
+                                    .t(self.template.barcode.rotation.i18n_key())
+                                    .to_string();
+                                egui::ComboBox::from_id_salt("insp_bc_rot")
+                                    .selected_text(rot_label)
+                                    .width(135.0)
+                                    .show_ui(ui, |ui| {
+                                        for r in Rotation::ALL {
+                                            let txt = self.i18n.t(r.i18n_key());
+                                            if ui
+                                                .selectable_value(
+                                                    &mut self.template.barcode.rotation,
+                                                    *r,
+                                                    txt,
+                                                )
+                                                .changed()
+                                            {
+                                                dirty = true;
+                                            }
+                                        }
+                                    });
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_barcode_x"));
+                                if Self::flexible_f32_edit(
+                                    &mut self.float_buffers,
+                                    ui,
+                                    "bc_x",
+                                    &mut self.template.barcode.x_mm,
+                                    0.0,
+                                    500.0,
+                                ) {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_barcode_y"));
+                                if Self::flexible_f32_edit(
+                                    &mut self.float_buffers,
+                                    ui,
+                                    "bc_y",
+                                    &mut self.template.barcode.y_mm,
+                                    0.0,
+                                    500.0,
+                                ) {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_barcode_w"));
+                                if Self::flexible_f32_edit(
+                                    &mut self.float_buffers,
+                                    ui,
+                                    "bc_w",
+                                    &mut self.template.barcode.width_mm,
+                                    4.0,
+                                    300.0,
+                                ) {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_barcode_h"));
+                                if Self::flexible_f32_edit(
+                                    &mut self.float_buffers,
+                                    ui,
+                                    "bc_h",
+                                    &mut self.template.barcode.height_mm,
+                                    3.0,
+                                    300.0,
+                                ) {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_module_scale"));
+                                if ui
+                                    .add(
+                                        egui::Slider::new(
+                                            &mut self.template.barcode.module_scale,
+                                            1..=8,
+                                        ),
+                                    )
+                                    .changed()
+                                {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_show_hr_text"));
+                                if ui.checkbox(&mut self.template.barcode.show_text, "").changed() {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+
+                                ui.label(self.i18n.t("lbl_hr_font_pt"));
+                                if Self::flexible_f32_edit(
+                                    &mut self.float_buffers,
+                                    ui,
+                                    "bc_font",
+                                    &mut self.template.barcode.text_font_pt,
+                                    3.0,
+                                    72.0,
+                                ) {
+                                    dirty = true;
+                                }
+                                ui.end_row();
+                            });
+                    }
+                    InspectorTab::TextLayers => {
+                        let desc_keys = ["col_desc1", "col_desc2", "col_desc3", "col_desc4"];
+                        for (idx, title_key) in desc_keys.iter().enumerate() {
+                            ui.group(|ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    let title = self.i18n.t(title_key).to_string();
+                                    if ui
+                                        .checkbox(
+                                            &mut self.template.desc_fields[idx].enabled,
+                                            RichText::new(title).strong(),
+                                        )
+                                        .changed()
+                                    {
+                                        dirty = true;
+                                    }
+
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            let a_txt = self
+                                                .i18n
+                                                .t(self.template.desc_fields[idx].align.i18n_key())
+                                                .to_string();
+                                            egui::ComboBox::from_id_salt(("desc_align", idx))
+                                                .selected_text(a_txt)
+                                                .width(68.0)
+                                                .show_ui(ui, |ui| {
+                                                    for a in TextAlign::ALL {
+                                                        let label = self.i18n.t(a.i18n_key());
+                                                        if ui
+                                                            .selectable_value(
+                                                                &mut self.template.desc_fields[idx]
+                                                                    .align,
+                                                                *a,
+                                                                label,
+                                                            )
+                                                            .changed()
+                                                        {
+                                                            dirty = true;
+                                                        }
+                                                    }
+                                                });
+
+                                            let r_txt = self
+                                                .i18n
+                                                .t(self.template.desc_fields[idx]
+                                                    .rotation
+                                                    .i18n_key())
+                                                .to_string();
+                                            egui::ComboBox::from_id_salt(("desc_rot", idx))
+                                                .selected_text(r_txt)
+                                                .width(96.0)
+                                                .show_ui(ui, |ui| {
+                                                    for r in Rotation::ALL {
+                                                        let label = self.i18n.t(r.i18n_key());
+                                                        if ui
+                                                            .selectable_value(
+                                                                &mut self.template.desc_fields[idx]
+                                                                    .rotation,
+                                                                *r,
+                                                                label,
+                                                            )
+                                                            .changed()
+                                                        {
+                                                            dirty = true;
+                                                        }
+                                                    }
+                                                });
+                                        },
+                                    );
+                                });
+
+                                if self.template.desc_fields[idx].enabled {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(self.i18n.t("lbl_pos_x"));
+                                        if Self::flexible_f32_edit(
+                                            &mut self.float_buffers,
+                                            ui,
+                                            &format!("d{idx}_x"),
+                                            &mut self.template.desc_fields[idx].x_mm,
+                                            0.0,
+                                            500.0,
+                                        ) {
+                                            dirty = true;
+                                        }
+
+                                        ui.label(self.i18n.t("lbl_pos_y"));
+                                        if Self::flexible_f32_edit(
+                                            &mut self.float_buffers,
+                                            ui,
+                                            &format!("d{idx}_y"),
+                                            &mut self.template.desc_fields[idx].y_mm,
+                                            0.0,
+                                            500.0,
+                                        ) {
+                                            dirty = true;
+                                        }
+                                    });
+
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label(self.i18n.t("lbl_text_width"));
+                                        if Self::flexible_f32_edit(
+                                            &mut self.float_buffers,
+                                            ui,
+                                            &format!("d{idx}_w"),
+                                            &mut self.template.desc_fields[idx].width_mm,
+                                            0.0,
+                                            500.0,
+                                        ) {
+                                            dirty = true;
+                                        }
+
+                                        ui.label(self.i18n.t("lbl_font_pt"));
+                                        if Self::flexible_f32_edit(
+                                            &mut self.float_buffers,
+                                            ui,
+                                            &format!("d{idx}_pt"),
+                                            &mut self.template.desc_fields[idx].font_size_pt,
+                                            3.0,
+                                            120.0,
+                                        ) {
+                                            dirty = true;
+                                        }
+                                    });
+                                }
+                            });
+                            ui.add_space(4.0);
+                        }
+                    }
+                }
+
+                if dirty {
+                    self.preview_dirty = true;
+                }
+            });
+    }
+
+    /// Orta Çalışma Alanı: Arama + Sanal Ürün Havuzu Tablosu + Çok Satırlı Etiket Kartı Editörü
+    fn draw_center_workspace(&mut self, ui: &mut egui::Ui) {
+        // 1. Arama Çubuğu ve Ürün Rozeti
+        ui.horizontal(|ui| {
+            ui.label("🔍");
             let search_resp = ui.add(
                 egui::TextEdit::singleline(&mut self.search_query)
-                    .hint_text(self.i18n.t("hint_search"))
-                    .desired_width(340.0),
+                    .hint_text(self.i18n.t("lbl_search_placeholder"))
+                    .desired_width(300.0),
             );
             if search_resp.changed() {
                 self.rebuild_filter();
@@ -718,32 +1433,42 @@ impl BarkodStudyoApp {
                 self.search_query.clear();
                 self.rebuild_filter();
             }
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "{} {}",
+                        self.filtered_indices.len(),
+                        self.i18n.t("lbl_items_badge")
+                    ))
+                    .strong()
+                    .color(MERDURA_TEAL),
+                );
+            });
         });
 
         ui.add_space(4.0);
 
-        // Alt paneller için yer bırakarak sanal tablo yüksekliğini hesapla
-        let available_h = (ui.available_height() - 165.0).max(140.0);
-
-        // 2. Sanal Tablo (egui_extras::TableBuilder — binlerce satırda sıfır kasma)
+        let table_height = (ui.available_height() - 185.0).max(140.0);
         let mut clicked_record_idx: Option<usize> = None;
         let mut double_clicked = false;
 
-        ui.push_id("records_virtual_table", |ui| {
+        // 2. Sanal Ürün Tablosu
+        ui.push_id("merdura_items_table", |ui| {
             TableBuilder::new(ui)
                 .striped(true)
                 .resizable(true)
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .sense(Sense::click())
                 .min_scrolled_height(100.0)
-                .max_scroll_height(available_h)
-                .column(Column::initial(44.0).at_least(36.0))
-                .column(Column::initial(165.0).at_least(100.0))
-                .column(Column::initial(180.0).at_least(90.0))
-                .column(Column::initial(180.0).at_least(90.0))
-                .column(Column::initial(150.0).at_least(80.0))
-                .column(Column::remainder().at_least(90.0))
-                .column(Column::initial(64.0).at_least(50.0))
+                .max_scroll_height(table_height)
+                .column(Column::initial(38.0).at_least(32.0))
+                .column(Column::initial(135.0).at_least(90.0))
+                .column(Column::initial(110.0).at_least(75.0))
+                .column(Column::remainder().at_least(140.0))
+                .column(Column::initial(110.0).at_least(70.0))
+                .column(Column::initial(95.0).at_least(65.0))
+                .column(Column::initial(56.0).at_least(46.0))
                 .header(24.0, |mut header| {
                     header.col(|ui| {
                         ui.strong("#");
@@ -769,7 +1494,7 @@ impl BarkodStudyoApp {
                 })
                 .body(|body| {
                     let row_count = self.filtered_indices.len();
-                    body.rows(22.0, row_count, |mut row| {
+                    body.rows(24.0, row_count, |mut row| {
                         let filtered_pos = row.index();
                         let rec_idx = self.filtered_indices[filtered_pos];
                         let rec = &self.records[rec_idx];
@@ -783,19 +1508,19 @@ impl BarkodStudyoApp {
                             ui.label(format!("{}", filtered_pos + 1));
                         });
                         let (_, r1) = row.col(|ui| {
-                            ui.label(&rec.barcode);
+                            ui.label(RichText::new(&rec.barcode).monospace());
                         });
                         let (_, r2) = row.col(|ui| {
-                            ui.label(&rec.desc1);
+                            ui.label(compact_single_line(&rec.desc1));
                         });
                         let (_, r3) = row.col(|ui| {
-                            ui.label(&rec.desc2);
+                            ui.label(compact_single_line(&rec.desc2));
                         });
                         let (_, r4) = row.col(|ui| {
-                            ui.label(&rec.desc3);
+                            ui.label(compact_single_line(&rec.desc3));
                         });
                         let (_, r5) = row.col(|ui| {
-                            ui.label(&rec.desc4);
+                            ui.label(compact_single_line(&rec.desc4));
                         });
                         let (_, r6) = row.col(|ui| {
                             ui.label(format!("{}", rec.print_count));
@@ -830,659 +1555,190 @@ impl BarkodStudyoApp {
             && let Some(rec) = self.records.get(idx)
         {
             self.selected_record_id = rec.id;
-            self.editor_record = rec.clone();
+            self.editor_record = normalize_legacy_multiline(rec);
             self.preview_dirty = true;
             if double_clicked {
                 self.focus_barcode_input = true;
             }
         }
 
-        ui.separator();
-
-        // 3. Alt Düzenleme Paneli
-        egui::Grid::new("record_editor_grid")
-            .num_columns(6)
-            .spacing([8.0, 6.0])
-            .show(ui, |ui| {
-                ui.label(RichText::new(self.i18n.t("col_barcode")).strong());
-                let bc_edit = ui.add(
-                    egui::TextEdit::singleline(&mut self.editor_record.barcode)
-                        .desired_width(180.0),
-                );
-                if self.focus_barcode_input {
-                    bc_edit.request_focus();
-                    self.focus_barcode_input = false;
-                }
-                if bc_edit.changed() {
-                    self.preview_dirty = true;
-                }
-
-                ui.label(self.i18n.t("col_desc1"));
-                if ui
-                    .add(
-                        egui::TextEdit::singleline(&mut self.editor_record.desc1)
-                            .desired_width(210.0),
-                    )
-                    .changed()
-                {
-                    self.preview_dirty = true;
-                }
-
-                ui.label(self.i18n.t("col_desc2"));
-                if ui
-                    .add(
-                        egui::TextEdit::singleline(&mut self.editor_record.desc2)
-                            .desired_width(210.0),
-                    )
-                    .changed()
-                {
-                    self.preview_dirty = true;
-                }
-                ui.end_row();
-
-                ui.label(self.i18n.t("col_count"));
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut self.editor_record.print_count)
-                            .range(1..=10_000),
-                    )
-                    .changed()
-                {
-                    self.preview_dirty = true;
-                }
-
-                ui.label(self.i18n.t("col_desc3"));
-                if ui
-                    .add(
-                        egui::TextEdit::singleline(&mut self.editor_record.desc3)
-                            .desired_width(210.0),
-                    )
-                    .changed()
-                {
-                    self.preview_dirty = true;
-                }
-
-                ui.label(self.i18n.t("col_desc4"));
-                if ui
-                    .add(
-                        egui::TextEdit::singleline(&mut self.editor_record.desc4)
-                            .desired_width(210.0),
-                    )
-                    .changed()
-                {
-                    self.preview_dirty = true;
-                }
-                ui.end_row();
-            });
-
         ui.add_space(6.0);
 
-        // 4. İşlem Çubuğu (Sol: Kayıt & Aktarım & Numaratör | Sağ: Grup Yönetimi)
-        ui.horizontal_wrapped(|ui| {
-            if ui.button(format!("📄 {}", self.i18n.t("btn_new"))).clicked() {
-                self.selected_record_id = None;
-                self.editor_record = BarcodeRecord::new_empty(self.active_group_id);
-                self.focus_barcode_input = true;
-                self.preview_dirty = true;
-            }
+        // 3. Alt Seçili Ürün & Doğal Çok Satırlı Etiket Kartı
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!("🏷 {}", self.i18n.t("sec_item_editor")))
+                        .size(13.0)
+                        .strong(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(self.i18n.t("hint_multiline"))
+                            .size(11.0)
+                            .italics()
+                            .color(Color32::from_rgb(120, 134, 155)),
+                    );
+                });
+            });
 
-            if ui.button(format!("💾 {}", self.i18n.t("btn_save"))).clicked() {
-                self.editor_record.group_id = self.active_group_id;
-                if self.editor_record.barcode.trim().is_empty() {
-                    let msg = self.i18n.t("err_empty_barcode").to_string();
-                    self.set_status(StatusLevel::Error, msg);
-                } else {
-                    match self.db.save_record(&self.editor_record) {
-                        Ok(saved_id) => {
-                            self.selected_record_id = Some(saved_id);
+            ui.add_space(2.0);
+
+            ui.columns(2, |cols| {
+                // Sol Sütun: Barkod, Stok Kodu, Ölçü/Özellik, Kopya
+                egui::Grid::new("card_left_grid")
+                    .num_columns(2)
+                    .spacing([8.0, 5.0])
+                    .show(&mut cols[0], |ui| {
+                        ui.label(RichText::new(self.i18n.t("col_barcode")).strong());
+                        let bc_edit = ui.add(
+                            egui::TextEdit::singleline(&mut self.editor_record.barcode)
+                                .desired_width(f32::INFINITY),
+                        );
+                        if self.focus_barcode_input {
+                            bc_edit.request_focus();
+                            self.focus_barcode_input = false;
+                        }
+                        if bc_edit.changed() {
+                            self.preview_dirty = true;
+                        }
+                        ui.end_row();
+
+                        ui.label(self.i18n.t("col_desc1"));
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut self.editor_record.desc1)
+                                    .desired_width(f32::INFINITY),
+                            )
+                            .changed()
+                        {
+                            self.preview_dirty = true;
+                        }
+                        ui.end_row();
+
+                        ui.label(self.i18n.t("col_desc3"));
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut self.editor_record.desc3)
+                                    .desired_width(f32::INFINITY),
+                            )
+                            .changed()
+                        {
+                            self.preview_dirty = true;
+                        }
+                        ui.end_row();
+
+                        ui.label(self.i18n.t("col_count"));
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut self.editor_record.print_count)
+                                    .range(1..=10_000),
+                            )
+                            .changed()
+                        {
+                            self.preview_dirty = true;
+                        }
+                        ui.end_row();
+                    });
+
+                // Sağ Sütun: Doğal Çok Satırlı Ürün Adı & Ek Not (Enter ile alt satır)
+                egui::Grid::new("card_right_grid")
+                    .num_columns(2)
+                    .spacing([8.0, 5.0])
+                    .show(&mut cols[1], |ui| {
+                        ui.label(self.i18n.t("col_desc2"));
+                        if ui
+                            .add(
+                                egui::TextEdit::multiline(&mut self.editor_record.desc2)
+                                    .desired_rows(2)
+                                    .desired_width(f32::INFINITY),
+                            )
+                            .changed()
+                        {
+                            self.preview_dirty = true;
+                        }
+                        ui.end_row();
+
+                        ui.label(self.i18n.t("col_desc4"));
+                        if ui
+                            .add(
+                                egui::TextEdit::multiline(&mut self.editor_record.desc4)
+                                    .desired_rows(2)
+                                    .desired_width(f32::INFINITY),
+                            )
+                            .changed()
+                        {
+                            self.preview_dirty = true;
+                        }
+                        ui.end_row();
+                    });
+            });
+
+            ui.add_space(4.0);
+
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .button(format!("+ {}", self.i18n.t("btn_new_item")))
+                    .clicked()
+                {
+                    self.selected_record_id = None;
+                    self.editor_record = BarcodeRecord::new_empty(self.active_group_id);
+                    self.focus_barcode_input = true;
+                    self.preview_dirty = true;
+                }
+
+                let save_btn = egui::Button::new(
+                    RichText::new(format!("✓ {}", self.i18n.t("btn_save_item")))
+                        .color(Color32::WHITE)
+                        .strong(),
+                )
+                .fill(MERDURA_TEAL);
+
+                if ui.add(save_btn).clicked() {
+                    self.editor_record.group_id = self.active_group_id;
+                    if self.editor_record.barcode.trim().is_empty() {
+                        let msg = self.i18n.t("err_empty_barcode").to_string();
+                        self.set_status(StatusLevel::Error, msg);
+                    } else {
+                        match self.db.save_record(&self.editor_record) {
+                            Ok(saved_id) => {
+                                self.selected_record_id = Some(saved_id);
+                                self.reload_records();
+                                let msg = self.i18n.t("msg_saved_record").to_string();
+                                self.set_status(StatusLevel::Info, msg);
+                            }
+                            Err(e) => self.set_status(StatusLevel::Error, format!("{e}")),
+                        }
+                    }
+                }
+
+                if ui
+                    .button(format!("🗑 {}", self.i18n.t("btn_delete_item")))
+                    .clicked()
+                    && let Some(sel_id) = self.selected_record_id
+                {
+                    match self.db.delete_record(sel_id) {
+                        Ok(()) => {
+                            self.selected_record_id = None;
                             self.reload_records();
-                            let msg = self.i18n.t("msg_saved_record").to_string();
+                            let msg = self.i18n.t("msg_deleted_record").to_string();
                             self.set_status(StatusLevel::Info, msg);
                         }
                         Err(e) => self.set_status(StatusLevel::Error, format!("{e}")),
                     }
                 }
-            }
 
-            if ui.button(format!("🗑 {}", self.i18n.t("btn_delete"))).clicked()
-                && let Some(sel_id) = self.selected_record_id
-            {
-                match self.db.delete_record(sel_id) {
-                    Ok(()) => {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(self.i18n.t("btn_clear_list")).clicked()
+                        && self.db.clear_group_records(self.active_group_id).is_ok()
+                    {
                         self.selected_record_id = None;
                         self.reload_records();
-                        let msg = self.i18n.t("msg_deleted_record").to_string();
+                        let msg = self.i18n.t("msg_cleared_group").to_string();
                         self.set_status(StatusLevel::Info, msg);
                     }
-                    Err(e) => self.set_status(StatusLevel::Error, format!("{e}")),
-                }
-            }
-
-            if ui.button(self.i18n.t("btn_delete_all")).clicked()
-                && self.db.clear_group_records(self.active_group_id).is_ok()
-            {
-                self.selected_record_id = None;
-                self.reload_records();
-                let msg = self.i18n.t("msg_cleared_group").to_string();
-                self.set_status(StatusLevel::Info, msg);
-            }
-
-            ui.separator();
-
-            if ui
-                .button(format!("📊 {}", self.i18n.t("btn_import_excel")))
-                .clicked()
-            {
-                self.pick_and_open_import_file();
-            }
-
-            if ui
-                .button(format!("🔢 {}", self.i18n.t("btn_numerator")))
-                .clicked()
-            {
-                self.numerator_dlg.open = true;
-            }
-
-            // Sağ taraf: Grup Yönetimi
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(self.i18n.t("btn_delete_group")).clicked() {
-                    if self.groups.len() <= 1 {
-                        let msg = self.i18n.t("err_cannot_delete_last_group").to_string();
-                        self.set_status(StatusLevel::Warning, msg);
-                    } else if let Err(e) = self.db.delete_group(self.active_group_id) {
-                        self.set_status(StatusLevel::Error, format!("{e}"));
-                    } else {
-                        self.reload_groups();
-                        self.selected_record_id = None;
-                        self.reload_records();
-                    }
-                }
-
-                if ui.button(self.i18n.t("btn_new_group")).clicked() {
-                    self.new_group_name.clear();
-                    self.new_group_open = true;
-                }
-
-                let active_group_name = self
-                    .groups
-                    .iter()
-                    .find(|g| g.id == self.active_group_id)
-                    .map(|g| g.name.clone())
-                    .unwrap_or_default();
-
-                egui::ComboBox::from_id_salt("group_selector_combo")
-                    .selected_text(active_group_name)
-                    .width(160.0)
-                    .show_ui(ui, |ui| {
-                        for grp in self.groups.clone() {
-                            if ui
-                                .selectable_label(self.active_group_id == grp.id, &grp.name)
-                                .clicked()
-                                && self.active_group_id != grp.id
-                            {
-                                self.active_group_id = grp.id;
-                                self.selected_record_id = None;
-                                self.reload_records();
-                            }
-                        }
-                    });
-
-                ui.label(RichText::new(self.i18n.t("lbl_group")).strong());
-            });
-        });
-
-        ui.add_space(4.0);
-        ui.label(
-            RichText::new(self.i18n.t("info_multiline"))
-                .small()
-                .color(Color32::from_rgb(95, 110, 130)),
-        );
-    }
-
-    fn draw_settings_tab(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        let total_h = ui.available_height();
-
-        ui.columns(2, |cols| {
-            // SOL PANEL: Sayısal ve Seçmeli Şablon & Yazıcı Ayarları
-            egui::ScrollArea::vertical()
-                .id_salt("settings_left_scroll")
-                .max_height(total_h)
-                .show(&mut cols[0], |ui| {
-                    let mut dirty = false;
-
-                    ui.heading(self.i18n.t("sec_printer_page"));
-                    ui.add_space(4.0);
-
-                    egui::Grid::new("printer_page_grid")
-                        .num_columns(2)
-                        .spacing([10.0, 6.0])
-                        .show(ui, |ui| {
-                            ui.label(self.i18n.t("lbl_printer"));
-                            ui.horizontal(|ui| {
-                                let p_label = if self.selected_printer.is_empty() {
-                                    "--"
-                                } else {
-                                    &self.selected_printer
-                                };
-                                egui::ComboBox::from_id_salt("printer_select_combo")
-                                    .selected_text(p_label)
-                                    .width(210.0)
-                                    .show_ui(ui, |ui| {
-                                        for p in &self.printers {
-                                            ui.selectable_value(
-                                                &mut self.selected_printer,
-                                                p.clone(),
-                                                p,
-                                            );
-                                        }
-                                    });
-                                if ui.button(self.i18n.t("btn_refresh_printers")).clicked() {
-                                    self.printers = list_system_printers();
-                                    if !self.printers.contains(&self.selected_printer) {
-                                        self.selected_printer =
-                                            self.printers.first().cloned().unwrap_or_default();
-                                    }
-                                }
-                            });
-                            ui.end_row();
-
-                            ui.label(self.i18n.t("lbl_columns"));
-                            if ui
-                                .add(egui::Slider::new(&mut self.template.columns, 1..=8))
-                                .changed()
-                            {
-                                dirty = true;
-                            }
-                            ui.end_row();
-
-                            ui.label(self.i18n.t("lbl_label_width"));
-                            if Self::flexible_f32_edit(
-                                &mut self.float_buffers,
-                                ui,
-                                "tpl_lw",
-                                &mut self.template.label_width_mm,
-                                5.0,
-                                500.0,
-                            ) {
-                                dirty = true;
-                            }
-                            ui.end_row();
-
-                            ui.label(self.i18n.t("lbl_label_height"));
-                            if Self::flexible_f32_edit(
-                                &mut self.float_buffers,
-                                ui,
-                                "tpl_lh",
-                                &mut self.template.label_height_mm,
-                                5.0,
-                                500.0,
-                            ) {
-                                dirty = true;
-                            }
-                            ui.end_row();
-
-                            ui.label(self.i18n.t("lbl_h_gap"));
-                            if Self::flexible_f32_edit(
-                                &mut self.float_buffers,
-                                ui,
-                                "tpl_hgap",
-                                &mut self.template.horizontal_gap_mm,
-                                0.0,
-                                100.0,
-                            ) {
-                                dirty = true;
-                            }
-                            ui.end_row();
-
-                            ui.label(self.i18n.t("lbl_margin_left"));
-                            if Self::flexible_f32_edit(
-                                &mut self.float_buffers,
-                                ui,
-                                "tpl_ml",
-                                &mut self.template.margin_left_mm,
-                                0.0,
-                                100.0,
-                            ) {
-                                dirty = true;
-                            }
-                            ui.end_row();
-
-                            ui.label(self.i18n.t("lbl_margin_top"));
-                            if Self::flexible_f32_edit(
-                                &mut self.float_buffers,
-                                ui,
-                                "tpl_mt",
-                                &mut self.template.margin_top_mm,
-                                0.0,
-                                100.0,
-                            ) {
-                                dirty = true;
-                            }
-                            ui.end_row();
-
-                            ui.label(self.i18n.t("lbl_dpi_override"));
-                            let mut custom_dpi = self.template.dpi_override.unwrap_or(0);
-                            if ui
-                                .add(egui::DragValue::new(&mut custom_dpi).range(0..=1200))
-                                .changed()
-                            {
-                                self.template.dpi_override = if custom_dpi < 72 {
-                                    None
-                                } else {
-                                    Some(custom_dpi)
-                                };
-                                dirty = true;
-                            }
-                            ui.end_row();
-                        });
-
-                    ui.add_space(10.0);
-                    ui.separator();
-                    ui.heading(self.i18n.t("sec_barcode_cfg"));
-                    ui.add_space(4.0);
-
-                    egui::Grid::new("barcode_cfg_grid")
-                        .num_columns(4)
-                        .spacing([8.0, 6.0])
-                        .show(ui, |ui| {
-                            ui.label(self.i18n.t("lbl_barcode_x"));
-                            if Self::flexible_f32_edit(
-                                &mut self.float_buffers,
-                                ui,
-                                "bc_x",
-                                &mut self.template.barcode.x_mm,
-                                0.0,
-                                500.0,
-                            ) {
-                                dirty = true;
-                            }
-
-                            ui.label(self.i18n.t("lbl_barcode_y"));
-                            if Self::flexible_f32_edit(
-                                &mut self.float_buffers,
-                                ui,
-                                "bc_y",
-                                &mut self.template.barcode.y_mm,
-                                0.0,
-                                500.0,
-                            ) {
-                                dirty = true;
-                            }
-                            ui.end_row();
-
-                            ui.label(self.i18n.t("lbl_barcode_w"));
-                            if Self::flexible_f32_edit(
-                                &mut self.float_buffers,
-                                ui,
-                                "bc_w",
-                                &mut self.template.barcode.width_mm,
-                                4.0,
-                                300.0,
-                            ) {
-                                dirty = true;
-                            }
-
-                            ui.label(self.i18n.t("lbl_barcode_h"));
-                            if Self::flexible_f32_edit(
-                                &mut self.float_buffers,
-                                ui,
-                                "bc_h",
-                                &mut self.template.barcode.height_mm,
-                                3.0,
-                                300.0,
-                            ) {
-                                dirty = true;
-                            }
-                            ui.end_row();
-
-                            ui.label(self.i18n.t("lbl_module_scale"));
-                            if ui
-                                .add(
-                                    egui::DragValue::new(&mut self.template.barcode.module_scale)
-                                        .range(1..=10),
-                                )
-                                .changed()
-                            {
-                                dirty = true;
-                            }
-
-                            ui.label(self.i18n.t("lbl_rotation"));
-                            let rot_label = self
-                                .i18n
-                                .t(self.template.barcode.rotation.i18n_key())
-                                .to_string();
-                            egui::ComboBox::from_id_salt("bc_rot_combo")
-                                .selected_text(rot_label)
-                                .width(115.0)
-                                .show_ui(ui, |ui| {
-                                    for r in Rotation::ALL {
-                                        let txt = self.i18n.t(r.i18n_key());
-                                        if ui
-                                            .selectable_value(
-                                                &mut self.template.barcode.rotation,
-                                                *r,
-                                                txt,
-                                            )
-                                            .changed()
-                                        {
-                                            dirty = true;
-                                        }
-                                    }
-                                });
-                            ui.end_row();
-
-                            if ui
-                                .checkbox(
-                                    &mut self.template.barcode.show_text,
-                                    self.i18n.t("lbl_show_hr_text"),
-                                )
-                                .changed()
-                            {
-                                dirty = true;
-                            }
-                            ui.label(self.i18n.t("lbl_hr_font_pt"));
-                            if Self::flexible_f32_edit(
-                                &mut self.float_buffers,
-                                ui,
-                                "bc_font",
-                                &mut self.template.barcode.text_font_pt,
-                                3.0,
-                                72.0,
-                            ) {
-                                dirty = true;
-                            }
-                            ui.label("");
-                            ui.end_row();
-                        });
-
-                    ui.add_space(10.0);
-                    ui.separator();
-                    ui.heading(self.i18n.t("sec_desc_fields"));
-                    ui.add_space(4.0);
-
-                    let desc_keys = ["col_desc1", "col_desc2", "col_desc3", "col_desc4"];
-                    for (idx, title_key) in desc_keys.iter().enumerate() {
-                        ui.group(|ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                let title = self.i18n.t(title_key).to_string();
-                                if ui
-                                    .checkbox(
-                                        &mut self.template.desc_fields[idx].enabled,
-                                        RichText::new(title).strong(),
-                                    )
-                                    .changed()
-                                {
-                                    dirty = true;
-                                }
-
-                                ui.label(self.i18n.t("lbl_pos_x"));
-                                if Self::flexible_f32_edit(
-                                    &mut self.float_buffers,
-                                    ui,
-                                    &format!("d{idx}_x"),
-                                    &mut self.template.desc_fields[idx].x_mm,
-                                    0.0,
-                                    500.0,
-                                ) {
-                                    dirty = true;
-                                }
-
-                                ui.label(self.i18n.t("lbl_pos_y"));
-                                if Self::flexible_f32_edit(
-                                    &mut self.float_buffers,
-                                    ui,
-                                    &format!("d{idx}_y"),
-                                    &mut self.template.desc_fields[idx].y_mm,
-                                    0.0,
-                                    500.0,
-                                ) {
-                                    dirty = true;
-                                }
-
-                                ui.label(self.i18n.t("lbl_text_width"));
-                                if Self::flexible_f32_edit(
-                                    &mut self.float_buffers,
-                                    ui,
-                                    &format!("d{idx}_w"),
-                                    &mut self.template.desc_fields[idx].width_mm,
-                                    0.0,
-                                    500.0,
-                                ) {
-                                    dirty = true;
-                                }
-                            });
-
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(self.i18n.t("lbl_font_pt"));
-                                if Self::flexible_f32_edit(
-                                    &mut self.float_buffers,
-                                    ui,
-                                    &format!("d{idx}_pt"),
-                                    &mut self.template.desc_fields[idx].font_size_pt,
-                                    3.0,
-                                    120.0,
-                                ) {
-                                    dirty = true;
-                                }
-
-                                ui.label(self.i18n.t("lbl_rotation"));
-                                let r_txt = self
-                                    .i18n
-                                    .t(self.template.desc_fields[idx].rotation.i18n_key())
-                                    .to_string();
-                                egui::ComboBox::from_id_salt(("desc_rot", idx))
-                                    .selected_text(r_txt)
-                                    .width(105.0)
-                                    .show_ui(ui, |ui| {
-                                        for r in Rotation::ALL {
-                                            let label = self.i18n.t(r.i18n_key());
-                                            if ui
-                                                .selectable_value(
-                                                    &mut self.template.desc_fields[idx].rotation,
-                                                    *r,
-                                                    label,
-                                                )
-                                                .changed()
-                                            {
-                                                dirty = true;
-                                            }
-                                        }
-                                    });
-
-                                ui.label(self.i18n.t("lbl_align"));
-                                let a_txt = self
-                                    .i18n
-                                    .t(self.template.desc_fields[idx].align.i18n_key())
-                                    .to_string();
-                                egui::ComboBox::from_id_salt(("desc_align", idx))
-                                    .selected_text(a_txt)
-                                    .width(80.0)
-                                    .show_ui(ui, |ui| {
-                                        for a in TextAlign::ALL {
-                                            let label = self.i18n.t(a.i18n_key());
-                                            if ui
-                                                .selectable_value(
-                                                    &mut self.template.desc_fields[idx].align,
-                                                    *a,
-                                                    label,
-                                                )
-                                                .changed()
-                                            {
-                                                dirty = true;
-                                            }
-                                        }
-                                    });
-                            });
-                        });
-                        ui.add_space(3.0);
-                    }
-
-                    if dirty {
-                        self.preview_dirty = true;
-                    }
                 });
-
-            // SAĞ PANEL: Canlı Önizleme Tuvali
-            let right_ui = &mut cols[1];
-            right_ui.heading(self.i18n.t("sec_live_preview"));
-            right_ui.horizontal_wrapped(|ui| {
-                if self.template.columns > 1
-                    && ui
-                        .checkbox(
-                            &mut self.preview_show_full_row,
-                            self.i18n.t("lbl_preview_mode_row"),
-                        )
-                        .changed()
-                {
-                    self.preview_dirty = true;
-                }
-                ui.label(self.i18n.t("lbl_zoom"));
-                ui.add(egui::Slider::new(&mut self.preview_zoom, 0.35..=2.5).text("x"));
-                if ui.button("1:1").clicked() {
-                    self.preview_zoom = 1.0;
-                }
             });
-
-            self.refresh_live_preview_if_needed(ctx);
-
-            let [pw, ph] = self.live_preview_size_px;
-            right_ui.label(
-                RichText::new(format!(
-                    "Rulo Genişliği: {:.1} mm × {:.1} mm ({} Sütun) | Önizleme: {}×{} px",
-                    self.template.total_row_width_mm(),
-                    self.template.total_row_height_mm(),
-                    self.template.columns,
-                    pw,
-                    ph
-                ))
-                .small()
-                .color(Color32::from_rgb(100, 115, 135)),
-            );
-
-            egui::Frame::canvas(right_ui.style())
-                .fill(Color32::from_rgb(220, 225, 232))
-                .inner_margin(14.0)
-                .show(right_ui, |ui| {
-                    egui::ScrollArea::both()
-                        .id_salt("live_preview_canvas_scroll")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            if let Some(tex) = &self.live_preview_tex {
-                                // 203 DPI pikselini ekran (96 DPI) gerçek oranına yaklaştırıp zoom ile çarp
-                                let screen_scale = (96.0 / 203.0) * self.preview_zoom * 1.45;
-                                let disp_size = egui::vec2(
-                                    (pw as f32 * screen_scale).max(20.0),
-                                    (ph as f32 * screen_scale).max(20.0),
-                                );
-                                ui.centered_and_justified(|ui| {
-                                    ui.add(
-                                        egui::Image::from_texture((tex.id(), disp_size))
-                                            .maintain_aspect_ratio(true),
-                                    );
-                                });
-                            }
-                        });
-                });
         });
     }
 
@@ -1503,14 +1759,14 @@ impl BarkodStudyoApp {
                     };
                 }
                 Err(e) => {
-                    self.set_status(StatusLevel::Error, format!("Dosya okunamadı: {e}"));
+                    self.set_status(StatusLevel::Error, format!("{e}"));
                 }
             }
         }
     }
 
     fn draw_modals(&mut self, ctx: &egui::Context) {
-        // 1. Yeni Grup Modalı
+        // 1. Yeni Koleksiyon Modalı
         if self.new_group_open {
             let mut open = self.new_group_open;
             egui::Window::new(self.i18n.t("dlg_new_group_title"))
@@ -1524,7 +1780,7 @@ impl BarkodStudyoApp {
                     });
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if ui.button(self.i18n.t("btn_save")).clicked() {
+                        if ui.button(self.i18n.t("btn_save_item")).clicked() {
                             match self.db.create_group(&self.new_group_name) {
                                 Ok(new_id) => {
                                     self.reload_groups();
@@ -1546,7 +1802,7 @@ impl BarkodStudyoApp {
             }
         }
 
-        // 2. Yeni Şablon Modalı
+        // 2. Şablon Farklı Kaydet Modalı
         if self.new_tpl_open {
             let mut open = self.new_tpl_open;
             egui::Window::new(self.i18n.t("dlg_new_tpl_title"))
@@ -1560,7 +1816,7 @@ impl BarkodStudyoApp {
                     });
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if ui.button(self.i18n.t("btn_save")).clicked() {
+                        if ui.button(self.i18n.t("btn_save_tpl")).clicked() {
                             let clean_name = self.new_tpl_name.trim().to_string();
                             if !clean_name.is_empty() {
                                 let final_name = if clean_name.to_lowercase().ends_with(".json") {
@@ -1595,7 +1851,7 @@ impl BarkodStudyoApp {
             }
         }
 
-        // 3. Seri Barkod Üretici (Numaratör) Modalı
+        // 3. Seri Barkod Üretici Modalı
         if self.numerator_dlg.open {
             let mut open = self.numerator_dlg.open;
             let mut do_generate = false;
@@ -1677,11 +1933,17 @@ impl BarkodStudyoApp {
                         width = pad
                     );
                     ui.add_space(4.0);
-                    ui.label(RichText::new(format!("Örnek İlk Barkod: {sample_first}")).italics());
+                    ui.label(RichText::new(format!("Örnek: {sample_first}")).italics());
                     ui.add_space(6.0);
 
                     ui.horizontal(|ui| {
-                        if ui.button(self.i18n.t("btn_generate")).clicked() {
+                        let gen_btn = egui::Button::new(
+                            RichText::new(self.i18n.t("btn_generate"))
+                                .color(Color32::WHITE)
+                                .strong(),
+                        )
+                        .fill(MERDURA_TEAL);
+                        if ui.add(gen_btn).clicked() {
                             do_generate = true;
                         }
                         if ui.button(self.i18n.t("btn_cancel")).clicked() {
@@ -1731,7 +1993,7 @@ impl BarkodStudyoApp {
             }
         }
 
-        // 4. Excel / CSV Sütun Eşleştirme ve İçe Aktarım Modalı
+        // 4. Tablo İçe Aktarma Sihirbazı Modalı
         if self.import_dlg.open {
             let mut open = self.import_dlg.open;
             let mut trigger_import = false;
@@ -1801,7 +2063,7 @@ impl BarkodStudyoApp {
                                 .num_columns(4)
                                 .spacing([10.0, 6.0])
                                 .show(ui, |ui| {
-                                    col_ComboBox(
+                                    col_combo(
                                         ui,
                                         "map_bc",
                                         self.i18n.t("col_barcode"),
@@ -1809,7 +2071,7 @@ impl BarkodStudyoApp {
                                         &col_labels,
                                         none_txt,
                                     );
-                                    col_ComboBox(
+                                    col_combo(
                                         ui,
                                         "map_cnt",
                                         self.i18n.t("col_count"),
@@ -1819,7 +2081,7 @@ impl BarkodStudyoApp {
                                     );
                                     ui.end_row();
 
-                                    col_ComboBox(
+                                    col_combo(
                                         ui,
                                         "map_d1",
                                         self.i18n.t("col_desc1"),
@@ -1827,7 +2089,7 @@ impl BarkodStudyoApp {
                                         &col_labels,
                                         none_txt,
                                     );
-                                    col_ComboBox(
+                                    col_combo(
                                         ui,
                                         "map_d2",
                                         self.i18n.t("col_desc2"),
@@ -1837,7 +2099,7 @@ impl BarkodStudyoApp {
                                     );
                                     ui.end_row();
 
-                                    col_ComboBox(
+                                    col_combo(
                                         ui,
                                         "map_d3",
                                         self.i18n.t("col_desc3"),
@@ -1845,7 +2107,7 @@ impl BarkodStudyoApp {
                                         &col_labels,
                                         none_txt,
                                     );
-                                    col_ComboBox(
+                                    col_combo(
                                         ui,
                                         "map_d4",
                                         self.i18n.t("col_desc4"),
@@ -1860,7 +2122,7 @@ impl BarkodStudyoApp {
                             let preview_recs =
                                 extract_records(sheet, mapping, self.active_group_id);
                             ui.label(format!(
-                                "{} (Toplam aktarılacak geçerli satır: {})",
+                                "{} ({})",
                                 self.i18n.t("lbl_preview_rows"),
                                 preview_recs.len()
                             ));
@@ -1883,10 +2145,10 @@ impl BarkodStudyoApp {
 
                                             for r in preview_recs.iter().take(10) {
                                                 ui.label(&r.barcode);
-                                                ui.label(&r.desc1);
-                                                ui.label(&r.desc2);
-                                                ui.label(&r.desc3);
-                                                ui.label(&r.desc4);
+                                                ui.label(compact_single_line(&r.desc1));
+                                                ui.label(compact_single_line(&r.desc2));
+                                                ui.label(compact_single_line(&r.desc3));
+                                                ui.label(compact_single_line(&r.desc4));
                                                 ui.label(format!("{}", r.print_count));
                                                 ui.end_row();
                                             }
@@ -1895,16 +2157,17 @@ impl BarkodStudyoApp {
 
                             ui.add_space(6.0);
                             ui.horizontal(|ui| {
-                                if ui
-                                    .add_enabled(
-                                        !preview_recs.is_empty(),
-                                        egui::Button::new(format!(
-                                            "✅ {}",
-                                            self.i18n.t("btn_import_confirm")
-                                        )),
-                                    )
-                                    .clicked()
-                                {
+                                let imp_btn = egui::Button::new(
+                                    RichText::new(format!(
+                                        "✓ {}",
+                                        self.i18n.t("btn_import_confirm")
+                                    ))
+                                    .color(Color32::WHITE)
+                                    .strong(),
+                                )
+                                .fill(MERDURA_TEAL);
+
+                                if ui.add_enabled(!preview_recs.is_empty(), imp_btn).clicked() {
                                     trigger_import = true;
                                 }
                                 if ui.button(self.i18n.t("btn_cancel")).clicked() {
@@ -1942,7 +2205,7 @@ impl BarkodStudyoApp {
             }
         }
 
-        // 5. Çok Sayfalı Baskı Önizleme Modalı
+        // 5. Çok Sayfalı Baskı Önizleme Merkezi
         if self.preview_modal.open {
             let mut open = self.preview_modal.open;
             let mut print_from_modal = false;
@@ -1950,7 +2213,7 @@ impl BarkodStudyoApp {
             egui::Window::new(self.i18n.t("dlg_preview_title"))
                 .collapsible(false)
                 .resizable(true)
-                .default_size([760.0, 520.0])
+                .default_size([780.0, 540.0])
                 .open(&mut open)
                 .show(ctx, |ui| {
                     let total_pages = self.preview_modal.pages.len().max(1);
@@ -1991,10 +2254,13 @@ impl BarkodStudyoApp {
                         );
 
                         ui.separator();
-                        if ui
-                            .button(format!("🖨 {}", self.i18n.t("btn_print_all")))
-                            .clicked()
-                        {
+                        let p_btn = egui::Button::new(
+                            RichText::new(format!("🖨 {}", self.i18n.t("btn_print_now")))
+                                .color(Color32::WHITE)
+                                .strong(),
+                        )
+                        .fill(MERDURA_TEAL);
+                        if ui.add(p_btn).clicked() {
                             print_from_modal = true;
                         }
                         if ui.button(self.i18n.t("btn_close")).clicked() {
@@ -2017,8 +2283,15 @@ impl BarkodStudyoApp {
                         self.preview_modal.texture_page_idx = Some(self.preview_modal.current_page);
                     }
 
+                    let modal_bg = if self.dark_mode {
+                        Color32::from_rgb(13, 16, 23)
+                    } else {
+                        Color32::from_rgb(218, 224, 232)
+                    };
+
                     egui::Frame::canvas(ui.style())
-                        .fill(Color32::from_rgb(218, 223, 230))
+                        .fill(modal_bg)
+                        .corner_radius(CornerRadius::same(8))
                         .inner_margin(12.0)
                         .show(ui, |ui| {
                             egui::ScrollArea::both()
@@ -2026,7 +2299,9 @@ impl BarkodStudyoApp {
                                 .show(ui, |ui| {
                                     if let (Some(tex), Some(img)) = (
                                         &self.preview_modal.texture,
-                                        self.preview_modal.pages.get(self.preview_modal.current_page),
+                                        self.preview_modal
+                                            .pages
+                                            .get(self.preview_modal.current_page),
                                     ) {
                                         let scale =
                                             (96.0 / 203.0) * self.preview_modal.zoom * 1.45;
@@ -2054,8 +2329,7 @@ impl BarkodStudyoApp {
     }
 }
 
-#[allow(non_snake_case)]
-fn col_ComboBox(
+fn col_combo(
     ui: &mut egui::Ui,
     id_salt: &str,
     label: &str,
@@ -2088,7 +2362,42 @@ fn format_clean_f32(v: f32) -> String {
     }
 }
 
-/// Türkçe İ/ı ve I/i dönüşüm kurallarına tam uyumlu küçük harfe çevirme.
+/// Tablo hücrelerinde çok satırlı metinleri tek satırda temiz gösterir.
+fn compact_single_line(s: &str) -> String {
+    let normalized = s.replace("+++", "\n");
+    let parts: Vec<&str> = normalized
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    parts.join(" ↵ ")
+}
+
+/// Eski kayıtlarda `+++` kalmışsa editöre yüklerken doğal satır sonuna (`\n`) dönüştürür.
+fn normalize_legacy_multiline(rec: &BarcodeRecord) -> BarcodeRecord {
+    let clean = |s: &str| {
+        if s.contains("+++") {
+            s.split("+++")
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            s.to_string()
+        }
+    };
+    BarcodeRecord {
+        id: rec.id,
+        group_id: rec.group_id,
+        barcode: rec.barcode.clone(),
+        desc1: clean(&rec.desc1),
+        desc2: clean(&rec.desc2),
+        desc3: clean(&rec.desc3),
+        desc4: clean(&rec.desc4),
+        print_count: rec.print_count,
+    }
+}
+
 fn turkish_lowercase(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
@@ -2122,63 +2431,105 @@ fn slice_1based_inclusive<T: Clone>(items: &[T], start_1based: usize, end_1based
 
 impl eframe::App for BarkodStudyoApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Pencere başlığını aktif dile göre senkron tut
+        if self.theme_dirty {
+            apply_merdura_theme(ctx, self.dark_mode);
+            self.theme_dirty = false;
+        }
+
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(
             self.i18n.t("app_title").to_string(),
         ));
 
-        // 1. Üst Araç Çubuğu + Sekme Başlıkları
-        egui::TopBottomPanel::top("top_main_bar").show(ctx, |ui| {
-            ui.add_space(3.0);
-            self.draw_top_toolbar(ctx, ui);
-            ui.add_space(2.0);
-        });
-
-        // 2. En Alt Durum Çubuğu
-        egui::TopBottomPanel::bottom("bottom_status_bar").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                let grp_name = self
-                    .groups
-                    .iter()
-                    .find(|g| g.id == self.active_group_id)
-                    .map(|g| g.name.as_str())
-                    .unwrap_or("-");
-
-                ui.label(format!(
-                    "{}: {}",
-                    self.i18n.t("status_group"),
-                    grp_name
-                ));
-                ui.separator();
-                ui.label(format!(
-                    "{}: {}",
-                    self.i18n.t("status_template"),
-                    self.active_template_file
-                ));
-                ui.separator();
-                ui.label(format!(
-                    "{}: {}",
-                    self.i18n.t("status_records"),
-                    self.records.len()
-                ));
-                ui.separator();
-
-                let msg_color = match self.status_level {
-                    StatusLevel::Info => Color32::from_rgb(35, 115, 65),
-                    StatusLevel::Warning => Color32::from_rgb(185, 110, 10),
-                    StatusLevel::Error => Color32::from_rgb(195, 35, 35),
-                };
-                ui.label(RichText::new(&self.status_msg).color(msg_color).strong());
+        // 1. ÜST MERDURA STÜDYO ÇUBUĞU
+        egui::TopBottomPanel::top("merdura_studio_header")
+            .frame(
+                egui::Frame::side_top_panel(&ctx.style())
+                    .inner_margin(Margin::symmetric(12, 8)),
+            )
+            .show(ctx, |ui| {
+                self.draw_studio_header(ctx, ui);
             });
-        });
 
-        // 3. Ana İçerik Alanı
-        egui::CentralPanel::default().show(ctx, |ui| match self.active_tab {
-            ActiveTab::Records => self.draw_records_tab(ui),
-            ActiveTab::Settings => self.draw_settings_tab(ctx, ui),
-        });
+        // 2. ALT DURUM ŞERİDİ
+        egui::TopBottomPanel::bottom("merdura_status_strip")
+            .frame(
+                egui::Frame::side_top_panel(&ctx.style())
+                    .inner_margin(Margin::symmetric(12, 5)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let grp_name = self
+                        .groups
+                        .iter()
+                        .find(|g| g.id == self.active_group_id)
+                        .map(|g| g.name.as_str())
+                        .unwrap_or("-");
 
-        // 4. Açık Diyalog Pencereleri
+                    ui.label(format!("{}: {}", self.i18n.t("status_group"), grp_name));
+                    ui.separator();
+                    ui.label(format!(
+                        "{}: {}",
+                        self.i18n.t("status_template"),
+                        self.active_template_file.trim_end_matches(".json")
+                    ));
+                    ui.separator();
+                    ui.label(format!(
+                        "{}: {}",
+                        self.i18n.t("status_records"),
+                        self.records.len()
+                    ));
+                    ui.separator();
+
+                    let msg_color = match self.status_level {
+                        StatusLevel::Info => {
+                            if self.dark_mode {
+                                MERDURA_TURQUOISE
+                            } else {
+                                MERDURA_TEAL
+                            }
+                        }
+                        StatusLevel::Warning => Color32::from_rgb(217, 130, 15),
+                        StatusLevel::Error => MERDURA_ROSE,
+                    };
+                    ui.label(RichText::new(&self.status_msg).color(msg_color).strong());
+                });
+            });
+
+        // 3. SOL KENAR ÇUBUĞU (Koleksiyonlar, Şablonlar & Araçlar)
+        egui::SidePanel::left("merdura_left_sidebar")
+            .default_width(232.0)
+            .width_range(195.0..=310.0)
+            .frame(
+                egui::Frame::side_top_panel(&ctx.style())
+                    .inner_margin(Margin::symmetric(10, 8)),
+            )
+            .show(ctx, |ui| {
+                self.draw_left_sidebar(ui);
+            });
+
+        // 4. SAĞ STÜDYO DENETÇİSİ (Her An Açık Canlı Etiket Sahnesi + 3 Sekmeli Denetçi)
+        egui::SidePanel::right("merdura_right_inspector")
+            .default_width(375.0)
+            .width_range(320.0..=520.0)
+            .frame(
+                egui::Frame::side_top_panel(&ctx.style())
+                    .inner_margin(Margin::symmetric(10, 8)),
+            )
+            .show(ctx, |ui| {
+                self.draw_right_inspector(ctx, ui);
+            });
+
+        // 5. ORTA ÇALIŞMA ALANI (Sanal Ürün Tablosu & Çok Satırlı Etiket Kartı)
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::central_panel(&ctx.style())
+                    .inner_margin(Margin::symmetric(12, 8)),
+            )
+            .show(ctx, |ui| {
+                self.draw_center_workspace(ui);
+            });
+
+        // 6. Açık Diyalog Pencereleri
         self.draw_modals(ctx);
     }
 }
@@ -2189,18 +2540,15 @@ mod tests {
 
     #[test]
     fn test_slice_1based_inclusive_ranges() {
-        let items: Vec<usize> = (101..=120).collect(); // 20 eleman (Sıra 1..=20)
-        // 1-10 arası tam 10 kayıt döndürmeli (101..=110)
+        let items: Vec<usize> = (101..=120).collect();
         let r1_10 = slice_1based_inclusive(&items, 1, 10);
         assert_eq!(r1_10.len(), 10);
         assert_eq!(r1_10.first(), Some(&101));
         assert_eq!(r1_10.last(), Some(&110));
 
-        // Ters girilse bile (10-5) güvenli şekilde 5..=10 döndürmeli
         let reversed = slice_1based_inclusive(&items, 10, 5);
         assert_eq!(reversed, vec![105, 106, 107, 108, 109, 110]);
 
-        // Üst sınır aşılırsa (18-50) mevcut son kayda kadar kırpmalı
         let clamped = slice_1based_inclusive(&items, 18, 50);
         assert_eq!(clamped, vec![118, 119, 120]);
     }

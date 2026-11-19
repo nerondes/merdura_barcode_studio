@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const DEFAULT_GROUP_NAME: &str = "Varsayılan Grup";
+pub const DEFAULT_GROUP_NAME: &str = "Genel Koleksiyon";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoreData {

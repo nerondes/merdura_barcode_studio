@@ -89,8 +89,8 @@ fn main() -> eframe::Result<()> {
 
     let mut viewport = ViewportBuilder::default()
         .with_title(initial_title)
-        .with_inner_size([1180.0, 740.0])
-        .with_min_inner_size([920.0, 580.0]);
+        .with_inner_size([1340.0, 800.0])
+        .with_min_inner_size([1020.0, 620.0]);
 
     if let Some((rgba, width, height)) = decode_png_rgba(EMBEDDED_WINDOW_ICON) {
         viewport = viewport.with_icon(Arc::new(IconData {
@@ -106,11 +106,11 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "barkod_studyo",
+        "merdura_barcode_studio",
         native_options,
         Box::new(move |cc| {
             configure_egui_fonts(&cc.egui_ctx, &font_engine);
-            cc.egui_ctx.set_visuals(egui::Visuals::light());
+            app::apply_merdura_theme(&cc.egui_ctx, false);
             Ok(Box::new(BarkodStudyoApp::new(
                 db,
                 i18n,
