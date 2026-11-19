@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./logo_barkod.png" alt="Merdura Barkod Stüdyo Logo" width="280" />
+</p>
+
 # Barkod Stüdyo (`barkod_studyo`)
 
 Termal rulo (Argox, Zebra, TSC vb.) ve standart ofis/lazer yazıcılarda **sıfır kayan nokta hatası** ve **sıfır C/C++ çalışma zamanı bağımlılığı** ile çalışan, çoklu sütun destekli yerel masaüstü barkod/etiket basım yazılımı.
@@ -25,4 +29,4 @@ cargo build --release
 
 1. **`src/main.rs` (Hazır):** `#[cfg(target_os = "macos")]` altında uygulama verileri App Store Sandbox uyumlu `~/Library/Application Support/com.merdura.barkodstudyo/` dizinine yönlendirildi.
 2. **`src/printer.rs` (Mac'te eklenecek):** `#[cfg(target_os = "macos")]` bloğuna `objc2-app-kit` üzerinden yerel `NSPrintInfo` / `NSPrintOperation` (`com.apple.security.print` Sandbox uyumlu) yazdırma motoru eklenecek.
-3. **`.app` & `.pkg` Paketleme:** Kök dizindeki `logo_barkod.png` dosyasından `sips` + `iconutil` ile `AppIcon.icns` üretilecek; `aarch64-apple-darwin` + `x86_64-apple-darwin` Universal Binary derlemesi, `Info.plist`, `Entitlements.plist` (`app-sandbox`, `print`, `files.user-selected.read-only`) ve `productbuild` imzalama adımları uygulanacak.
+3. **`.app` & `.pkg` Paketleme:** `assets/icon_1024.png` hazır kare uygulama ikonundan `sips` + `iconutil` ile `AppIcon.icns` üretilecek; `aarch64-apple-darwin` + `x86_64-apple-darwin` Universal Binary derlemesi, `Info.plist`, `Entitlements.plist` (`app-sandbox`, `print`, `files.user-selected.read-only`) ve `productbuild` imzalama adımları uygulanacak.

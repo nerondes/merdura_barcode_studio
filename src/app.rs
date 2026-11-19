@@ -130,6 +130,7 @@ pub struct BarkodStudyoApp {
     preview_zoom: f32,
     live_preview_tex: Option<TextureHandle>,
     live_preview_size_px: [u32; 2],
+    brand_logo_tex: Option<TextureHandle>,
 
     // Diyalog pencereleri
     new_group_open: bool,
@@ -197,6 +198,7 @@ impl BarkodStudyoApp {
             preview_zoom: 1.0,
             live_preview_tex: None,
             live_preview_size_px: [1, 1],
+            brand_logo_tex: None,
             new_group_open: false,
             new_group_name: String::new(),
             new_tpl_open: false,
@@ -457,10 +459,33 @@ impl BarkodStudyoApp {
         changed
     }
 
-    fn draw_top_toolbar(&mut self, ui: &mut egui::Ui) {
-        // 1. Satır: Tümünü / Aktif Kaydı / Belirli Sıra Aralığını Önizle & Yazdır + Dil Seçici
+    fn ensure_brand_logo(&mut self, ctx: &egui::Context) {
+        if self.brand_logo_tex.is_some() {
+            return;
+        }
+        const HEADER_LOGO_BYTES: &[u8] = include_bytes!("../assets/logo_header.png");
+        if let Some((rgba, w, h)) = crate::decode_png_rgba(HEADER_LOGO_BYTES) {
+            let cimg = ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+            self.brand_logo_tex =
+                Some(ctx.load_texture("merdura_brand_logo", cimg, TextureOptions::LINEAR));
+        }
+    }
+
+    fn draw_top_toolbar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        self.ensure_brand_logo(ctx);
+
+        // 1. Satır: Marka Logosu + Tümünü / Aktif Kaydı / Belirli Sıra Aralığını Önizle & Yazdır + Dil Seçici
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
+
+            if let Some(logo_tex) = &self.brand_logo_tex {
+                ui.add(
+                    egui::Image::from_texture((logo_tex.id(), egui::vec2(46.0, 24.0)))
+                        .maintain_aspect_ratio(true),
+                )
+                .on_hover_text(self.i18n.t("app_title"));
+                ui.separator();
+            }
 
             if ui.button(format!("🔍 {}", self.i18n.t("btn_preview_all"))).clicked() {
                 let all: Vec<BarcodeRecord> = self
@@ -2105,7 +2130,7 @@ impl eframe::App for BarkodStudyoApp {
         // 1. Üst Araç Çubuğu + Sekme Başlıkları
         egui::TopBottomPanel::top("top_main_bar").show(ctx, |ui| {
             ui.add_space(3.0);
-            self.draw_top_toolbar(ui);
+            self.draw_top_toolbar(ctx, ui);
             ui.add_space(2.0);
         });
 

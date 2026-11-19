@@ -135,6 +135,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui_extras",
+ "png",
  "qrcode",
  "rfd",
  "serde",
